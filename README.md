@@ -120,3 +120,7 @@ tests/run-tests.sh         test suite (bash + jq)
 - pas de commit tant que les tests sont rouges.
 
 **Utilisation :** `./install.sh <projet>` copie les hooks et fusionne `.claude/settings.json` sans rien écraser (sauvegarde, `--dry-run`, relançable pour mettre à jour). Les règles s'adaptent dans les fichiers `.tsv`. 118 tests, CI sous Linux et macOS, et des essais avec une vraie session Claude Code. Le premier essai a montré qu'un agent bloqué sur l'outil `Write` passe par le shell : chaque protection doit couvrir tous les chemins.
+
+## License
+
+[MIT](LICENSE)

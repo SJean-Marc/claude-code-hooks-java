@@ -74,6 +74,7 @@ run chmod +x "$dest"/*.sh
 # The commit hook auto-detects ./mvnw, mvn, ./gradlew and gradle.
 
 # --- 2. merge settings.json
+backup=""
 current='{}'
 [[ -f "$settings" ]] && current="$(cat "$settings")"
 
@@ -115,3 +116,6 @@ Done$note. Next steps in $target:
   - start Claude Code and run /hooks to check they are loaded
   - commit .claude/hooks/ and .claude/settings.json so the whole team gets them
 EOF
+if [[ -n "$backup" ]] && ! $dry_run; then
+  echo "  - check the merge, then delete $(basename "$backup") (do not commit it)"
+fi

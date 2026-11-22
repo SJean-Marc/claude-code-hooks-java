@@ -48,7 +48,7 @@ cd claude-code-hooks-java
 `install.sh` copies `.claude/hooks/` into your project and **merges** the hooks into its `.claude/settings.json`:
 
 - what is already there stays (permissions, your own hooks, other settings); only the missing hook commands are added;
-- `settings.json` is backed up before any change, and an invalid one is left untouched;
+- `settings.json` is backed up before any change (`settings.json.bak-<date>`: delete it once you have checked the merge, do not commit it), and an invalid one is left untouched;
 - rule files you have customized are kept (`--force` to overwrite them);
 - running it again changes nothing, so it is also how you update.
 

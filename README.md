@@ -80,7 +80,7 @@ Write the message for the agent: say **why** it is blocked and **what to do inst
 
 ## How it is tested
 
-- [`tests/run-tests.sh`](tests/run-tests.sh): 101 checks. For the hooks, each case sends the same JSON Claude Code sends, then checks the hook blocks or allows. For the installer: fresh project, merge into existing settings, rerun, customized rules, dry run, invalid JSON. About a third of the cases check that normal commands still pass: a guardrail that blocks `rm -rf target` gets switched off by the team within a day.
+- [`tests/run-tests.sh`](tests/run-tests.sh): 118 checks. For the hooks, each case sends the same JSON Claude Code sends, then checks the hook blocks or allows. For the installer: fresh project, merge into existing settings, rerun, customized rules, dry run, invalid JSON. About a third of the cases check that normal commands still pass: a guardrail that blocks `rm -rf target` gets switched off by the team within a day.
 - CI on Linux and macOS (GNU and BSD `grep` differ), plus ShellCheck.
 - This repo uses its own hooks: its `.claude/hooks/test-command` runs the test suite before every commit Claude makes here.
 - End-to-end checks with a real Claude Code session (2.1.330). The first run found a hole: with the `Write` tool blocked on `.env`, the agent simply ran `printf 'DB_PASSWORD=...' > .env` in the shell. The shell rules now cover writes to secret files too, and the same session is blocked both ways.
@@ -119,4 +119,4 @@ tests/run-tests.sh         test suite (bash + jq)
 - secrets dans les fichiers (clés API, tokens, mots de passe en dur dans `application.yml`) ;
 - pas de commit tant que les tests sont rouges.
 
-**Utilisation :** `./install.sh <projet>` copie les hooks et fusionne `.claude/settings.json` sans rien écraser (sauvegarde, `--dry-run`, relançable pour mettre à jour). Les règles s'adaptent dans les fichiers `.tsv`. 101 tests, CI sous Linux et macOS, et des essais avec une vraie session Claude Code. Le premier essai a montré qu'un agent bloqué sur l'outil `Write` passe par le shell : chaque protection doit couvrir tous les chemins.
+**Utilisation :** `./install.sh <projet>` copie les hooks et fusionne `.claude/settings.json` sans rien écraser (sauvegarde, `--dry-run`, relançable pour mettre à jour). Les règles s'adaptent dans les fichiers `.tsv`. 118 tests, CI sous Linux et macOS, et des essais avec une vraie session Claude Code. Le premier essai a montré qu'un agent bloqué sur l'outil `Write` passe par le shell : chaque protection doit couvrir tous les chemins.

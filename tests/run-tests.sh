@@ -67,6 +67,20 @@ cmd_block 'echo "A=b" >> .env.local'
 cmd_block 'echo "A=b" | tee .env.production'
 cmd_block 'cat .env.production'
 cmd_block 'source .env && ./mvnw spring-boot:run'
+cmd_block $'cat <<EOF > .env\nDB_PASSWORD=x\nEOF'
+cmd_block 'echo A=b>.env'
+cmd_block 'echo A=b &> .env'
+cmd_block 'cp .env.example .env'
+cmd_block 'mv tmp.txt .env'
+cmd_block 'echo A=b > ".env"'
+cmd_block "echo A=b > './.env'"
+cmd_block "sed -i 's/x/y/' .env"
+cmd_block "sed -E -i 's/x/y/' .env.production"
+cmd_block "python3 -c \"open('.env','w').write('A=b')\""
+cmd_block "node -e \"require('fs').writeFileSync('.env','A=b')\""
+cmd_block 'install -m 600 /dev/null .env'
+cmd_block 'dd if=tmp of=.env'
+cmd_block 'touch .env'
 
 cmd_allow 'rm -rf target'
 cmd_allow 'rm -rf ./build/tmp'
@@ -84,6 +98,9 @@ cmd_allow 'cat .env.example'
 cmd_allow 'cp .env.example .env.example.bak'
 cmd_allow "echo 'DB_PASSWORD=changeme' > .env.example"
 cmd_allow 'ls -la .envrc-docs'
+cmd_allow "python3 -c \"print(open('.env.example').read())\""
+cmd_allow "sed -i 's/8080/8081/' src/main/resources/application.yml"
+cmd_allow 'touch src/main/resources/application-local.yml'
 cmd_allow 'grep -rn "TODO" src'
 cmd_allow 'chmod 755 mvnw'
 

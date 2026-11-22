@@ -158,5 +158,68 @@ commit_test block none 'git commit -m "feat"' 'auto-detected ./mvnw'
 CLAUDE_PROJECT_DIR="$TMP_PROJECT" run_hook require-tests-before-commit.sh "$(bash_input 'git commit -m feat')"
 if grep -q 'OrderServiceTest > export FAILED' <<< "$err"; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL test output not shown to Claude: $err"; fi
 
+# --- install.sh
+check() {  # <label> <command...>: passes when the command succeeds
+  local label="$1"; shift
+  if "$@" >/dev/null 2>&1; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL [install.sh] $label"; fi
+}
+INSTALL_TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP_PROJECT" "$INSTALL_TMP"' EXIT
+hook_count() { jq '[.hooks[][] | .hooks[] | select(.command | test("CLAUDE_PROJECT_DIR"))] | length' "$1"; }
+
+# fresh project, no .claude/
+mkdir -p "$INSTALL_TMP/fresh"
+"$ROOT/install.sh" "$INSTALL_TMP/fresh" >/dev/null 2>&1
+check 'fresh: settings.json created and valid'  jq empty "$INSTALL_TMP/fresh/.claude/settings.json"
+check 'fresh: 3 hooks registered'               test "$(hook_count "$INSTALL_TMP/fresh/.claude/settings.json")" = 3
+check 'fresh: hooks are executable'             test -x "$INSTALL_TMP/fresh/.claude/hooks/protect-secrets.sh"
+check 'fresh: rules copied'                     test -f "$INSTALL_TMP/fresh/.claude/hooks/rules/dangerous-commands.tsv"
+check 'fresh: repo-specific test-command not copied' test ! -e "$INSTALL_TMP/fresh/.claude/hooks/test-command"
+check 'fresh: installed hook blocks in the target' \
+  bash -c "! printf '%s' '$(bash_input 'git push --force')' | '$INSTALL_TMP/fresh/.claude/hooks/block-dangerous-commands.sh'"
+
+# existing settings: keep everything, add only what is missing
+mkdir -p "$INSTALL_TMP/existing/.claude"
+cat > "$INSTALL_TMP/existing/.claude/settings.json" <<'JSON'
+{"permissions":{"deny":["Read(./.env)"]},
+ "hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"./team-audit.sh"}]}],
+          "Stop":[{"hooks":[{"type":"command","command":"./notify.sh"}]}]}}
+JSON
+"$ROOT/install.sh" "$INSTALL_TMP/existing" >/dev/null 2>&1
+S="$INSTALL_TMP/existing/.claude/settings.json"
+check 'merge: permissions kept'      test "$(jq -r '.permissions.deny[0]' "$S")" = 'Read(./.env)'
+check 'merge: team hook kept'        test "$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$S")" = './team-audit.sh'
+check 'merge: Stop hook kept'        test "$(jq -r '.hooks.Stop[0].hooks[0].command' "$S")" = './notify.sh'
+check 'merge: 3 hooks added'         test "$(hook_count "$S")" = 3
+check 'merge: one Bash group only'   test "$(jq '[.hooks.PreToolUse[] | select(.matcher == "Bash")] | length' "$S")" = 1
+check 'merge: backup written'        bash -c "compgen -G '$INSTALL_TMP/existing/.claude/settings.json.bak-*'"
+
+# second run changes nothing
+cp "$S" "$INSTALL_TMP/before.json"
+"$ROOT/install.sh" "$INSTALL_TMP/existing" >/dev/null 2>&1
+check 'rerun: settings unchanged'    cmp -s "$S" "$INSTALL_TMP/before.json"
+backups=("$INSTALL_TMP"/existing/.claude/settings.json.bak-*)
+check 'rerun: no second backup'      test "${#backups[@]}" = 1
+
+# customized rules are kept, unless --force
+R="$INSTALL_TMP/existing/.claude/hooks/rules/dangerous-commands.tsv"
+printf 'custom-rule\tteam rule\n' > "$R"
+"$ROOT/install.sh" "$INSTALL_TMP/existing" >/dev/null 2>&1
+check 'rules: customized file kept'  grep -q '^custom-rule' "$R"
+"$ROOT/install.sh" --force "$INSTALL_TMP/existing" >/dev/null 2>&1
+check 'rules: --force overwrites'    cmp -s "$R" "$HOOKS/rules/dangerous-commands.tsv"
+
+# --dry-run changes nothing
+mkdir -p "$INSTALL_TMP/dry"
+"$ROOT/install.sh" --dry-run "$INSTALL_TMP/dry" >/dev/null 2>&1
+check 'dry-run: nothing written'     test ! -e "$INSTALL_TMP/dry/.claude"
+
+# invalid settings.json: refuse and leave it alone
+mkdir -p "$INSTALL_TMP/broken/.claude"
+printf '{ "hooks": ' > "$INSTALL_TMP/broken/.claude/settings.json"
+check 'invalid json: install refuses' bash -c "! '$ROOT/install.sh' '$INSTALL_TMP/broken'"
+check 'invalid json: file untouched'  test "$(cat "$INSTALL_TMP/broken/.claude/settings.json")" = '{ "hooks": '
+check 'missing target: install refuses' bash -c "! '$ROOT/install.sh' '$INSTALL_TMP/does-not-exist'"
+
 echo "passed: $pass, failed: $fail"
 [[ "$fail" == 0 ]]

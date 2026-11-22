@@ -38,15 +38,32 @@ The agent then adapts on its own: it uses `--force-with-lease`, writes `.env.exa
 
 Requirements: `bash` and [`jq`](https://jqlang.org). Nothing else.
 
-1. Copy the `.claude/hooks/` folder into your project.
-2. Merge the `hooks` section of [`.claude/settings.json`](.claude/settings.json) into your project's `.claude/settings.json`.
-3. Optional: tell the commit hook how to run your tests. By default it detects `./mvnw`, `mvn`, `./gradlew` or `gradle`. To override, put a command in `.claude/hooks/test-command` (or set `CLAUDE_HOOKS_TEST_CMD`):
+```bash
+git clone https://github.com/SJean-Marc/claude-code-hooks-java.git
+cd claude-code-hooks-java
+./install.sh --dry-run ~/code/my-spring-app   # shows what would change
+./install.sh ~/code/my-spring-app
+```
+
+`install.sh` copies `.claude/hooks/` into your project and **merges** the hooks into its `.claude/settings.json`:
+
+- what is already there stays (permissions, your own hooks, other settings); only the missing hook commands are added;
+- `settings.json` is backed up before any change, and an invalid one is left untouched;
+- rule files you have customized are kept (`--force` to overwrite them);
+- running it again changes nothing, so it is also how you update.
+
+It runs from a clone on purpose: piping a script from the network into a shell is exactly what these hooks block.
+
+Then:
+
+1. Optional: tell the commit hook how to run your tests. By default it detects `./mvnw`, `mvn`, `./gradlew` or `gradle`. To override, put a command in `.claude/hooks/test-command` (or set `CLAUDE_HOOKS_TEST_CMD`):
 
    ```
    ./mvnw -q -B verify -Dgroups=unit
    ```
 
-4. Start Claude Code in the project. Run `/hooks` to check the hooks are loaded.
+2. Start Claude Code in the project and run `/hooks` to check the hooks are loaded.
+3. Commit `.claude/hooks/` and `.claude/settings.json` so the whole team gets the same guardrails.
 
 ### Adapt the rules
 
@@ -63,7 +80,7 @@ Write the message for the agent: say **why** it is blocked and **what to do inst
 
 ## How it is tested
 
-- [`tests/run-tests.sh`](tests/run-tests.sh): 81 cases. Each one sends a hook the same JSON Claude Code sends, then checks the hook blocks or allows. About a third of the cases check that normal commands still pass: a guardrail that blocks `rm -rf target` gets switched off by the team within a day.
+- [`tests/run-tests.sh`](tests/run-tests.sh): 101 checks. For the hooks, each case sends the same JSON Claude Code sends, then checks the hook blocks or allows. For the installer: fresh project, merge into existing settings, rerun, customized rules, dry run, invalid JSON. About a third of the cases check that normal commands still pass: a guardrail that blocks `rm -rf target` gets switched off by the team within a day.
 - CI on Linux and macOS (GNU and BSD `grep` differ), plus ShellCheck.
 - This repo uses its own hooks: its `.claude/hooks/test-command` runs the test suite before every commit Claude makes here.
 - End-to-end checks with a real Claude Code session (2.1.330). The first run found a hole: with the `Write` tool blocked on `.env`, the agent simply ran `printf 'DB_PASSWORD=...' > .env` in the shell. The shell rules now cover writes to secret files too, and the same session is blocked both ways.
@@ -86,6 +103,7 @@ That last point is the main lesson: **an agent that is blocked looks for another
     rules/*.tsv            the rules (regex <TAB> message)
     *.sh                   the three hooks
     test-command           test command for this repo
+install.sh                 installer: copy hooks + merge settings.json
 tests/run-tests.sh         test suite (bash + jq)
 .github/workflows/ci.yml   ShellCheck + tests on Linux and macOS
 ```
@@ -101,4 +119,4 @@ tests/run-tests.sh         test suite (bash + jq)
 - secrets dans les fichiers (clés API, tokens, mots de passe en dur dans `application.yml`) ;
 - pas de commit tant que les tests sont rouges.
 
-**Utilisation :** copier `.claude/hooks/`, fusionner `.claude/settings.json`, adapter les règles dans les fichiers `.tsv`. 81 tests, CI sous Linux et macOS, et des essais avec une vraie session Claude Code. Le premier essai a montré qu'un agent bloqué sur l'outil `Write` passe par le shell : chaque protection doit couvrir tous les chemins.
+**Utilisation :** `./install.sh <projet>` copie les hooks et fusionne `.claude/settings.json` sans rien écraser (sauvegarde, `--dry-run`, relançable pour mettre à jour). Les règles s'adaptent dans les fichiers `.tsv`. 101 tests, CI sous Linux et macOS, et des essais avec une vraie session Claude Code. Le premier essai a montré qu'un agent bloqué sur l'outil `Write` passe par le shell : chaque protection doit couvrir tous les chemins.

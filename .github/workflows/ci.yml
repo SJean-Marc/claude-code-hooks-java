@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: ShellCheck
-        run: shellcheck -x .claude/hooks/*.sh .claude/hooks/lib/common.sh tests/run-tests.sh
+        run: shellcheck -x install.sh .claude/hooks/*.sh .claude/hooks/lib/common.sh tests/run-tests.sh
       - name: settings.json is valid JSON
         run: jq empty .claude/settings.json
 

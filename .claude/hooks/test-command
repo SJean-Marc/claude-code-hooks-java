@@ -1,0 +1,2 @@
+# Test command run by require-tests-before-commit.sh before every `git commit` made by Claude.
+tests/run-tests.sh

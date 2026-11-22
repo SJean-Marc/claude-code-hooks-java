@@ -1,0 +1,2 @@
+# ShellCheck settings for the whole repo (used locally and in CI)
+source-path=SCRIPTDIR

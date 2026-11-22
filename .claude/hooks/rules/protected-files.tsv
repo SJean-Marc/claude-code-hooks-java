@@ -1,0 +1,7 @@
+# Rules for protect-secrets.sh: files the agent must not create or edit.
+# Format: <extended regex matched against the file path><TAB><reason>. Case-insensitive.
+
+(^|/)\.env(\.[a-z0-9_-]+)?$	this is a real environment file. Put placeholders in .env.example and let the human fill .env.
+\.(pem|key|p12|pfx|jks|keystore)$	private keys and keystores are never written by the agent.
+(^|/)id_(rsa|dsa|ecdsa|ed25519)$	SSH private key.
+(^|/)\.(netrc|npmrc|pypirc)$|(^|/)\.m2/settings\.xml$|(^|/)\.docker/config\.json$	this file usually holds registry or repository credentials. Ask the human.

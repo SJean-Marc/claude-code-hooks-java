@@ -1,0 +1,16 @@
+# Secrets never go in the repo
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+
+# Local Claude Code settings (personal, not shared)
+.claude/settings.local.json
+
+# OS / editors
+.DS_Store
+.idea/
+.vscode/

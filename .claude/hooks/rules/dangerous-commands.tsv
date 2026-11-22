@@ -1,0 +1,29 @@
+# Rules for block-dangerous-commands.sh
+# Format: <extended regex><TAB><reason shown to Claude>. Matching is case-insensitive.
+# Use POSIX classes ([[:space:]]) so the rules behave the same with GNU and BSD grep.
+# This is a guardrail, not a sandbox: it catches mistakes, not a determined attacker.
+
+# --- Destructive file operations
+(^|[^[:alnum:]_-])rm[[:space:]]+-[a-z]*(r[a-z]*f|f[a-z]*r)[a-z]*[[:space:]]+([^[:space:]]+[[:space:]]+)*((/|~|\$HOME|\.\./)[^[:space:]]*|\*|\.\.?/?\*?)([[:space:]]|$)	recursive force delete outside the project (absolute path, ~, $HOME, *, . or ..). Delete explicit paths inside the project instead.
+(^|[^[:alnum:]_-])rm[[:space:]]+-r[[:space:]]+-f|rm[[:space:]]+-f[[:space:]]+-r|--no-preserve-root	rm with separate -r -f flags (or --no-preserve-root). Delete explicit paths inside the project instead.
+(^|[^[:alnum:]_-])(mkfs|dd[[:space:]][^;&|]*of=/dev/)	writing to a raw device. Never needed for application development.
+chmod[[:space:]]+(-r[[:space:]]+)?0?777	chmod 777 opens files to everyone. Use the narrowest permission that works (e.g. 755 or 644).
+(^|[;&|[:space:]])sudo[[:space:]]	sudo is not allowed for the agent. Ask the human to run privileged commands.
+
+# --- Git history and remote
+git[[:space:]]+push[^;&|]*[[:space:]](--force|-f)([[:space:]]|$)	force push rewrites shared history. Use --force-with-lease on your own branch, or ask the human.
+git[[:space:]]+reset[[:space:]][^;&|]*--hard	git reset --hard throws away uncommitted work. Use git stash, or ask the human.
+git[[:space:]]+clean[[:space:]]+-[a-z]*f	git clean -f deletes untracked files for good. List them with git clean -n and ask the human.
+git[[:space:]]+commit[^;&|]*(--no-verify|[[:space:]]-n([[:space:]]|$))	--no-verify skips the project's checks. Fix the failing check instead.
+
+# --- Remote code and publication
+(curl|wget)[^;&]*\|[[:space:]]*(sudo[[:space:]]+)?(ba|z|da)?sh([[:space:]]|$)	piping a downloaded script into a shell runs unreviewed code. Download it, read it, then ask the human.
+(mvn|gradle)w?[[:space:]][^;&|]*(deploy|publish)([[:space:]]|$)	publishing an artifact is a release decision. Ask the human.
+docker[[:space:]]+push|kubectl[[:space:]]+(delete|drain)|helm[[:space:]]+(uninstall|delete)	pushing images or deleting cluster resources is an operations decision. Ask the human.
+
+# --- Data
+drop[[:space:]]+(database|schema|table)|truncate[[:space:]]+table	destructive SQL. Write a migration (Flyway/Liquibase) and let the human review it.
+
+# --- Secrets
+(cat|less|more|head|tail|bat|grep|cp|scp|mv|source|base64|xxd)[[:space:]][^;&|]*(\.env(\.(local|dev|development|prod|production|staging|test))?([[:space:];&|)]|$)|id_(rsa|dsa|ecdsa|ed25519)([[:space:];&|)]|$)|\.(pem|key|p12|pfx|jks)([[:space:];&|)]|$))	reading, copying or moving secret files. Use .env.example or ask the human for the value you need.
+(>>?|tee([[:space:]]+-a)?)[[:space:]]*[^[:space:];&|]*(\.env(\.(local|dev|development|prod|production|staging|test))?([[:space:];&|)]|$)|id_(rsa|dsa|ecdsa|ed25519)([[:space:];&|)]|$)|\.(pem|key|p12|pfx|jks)([[:space:];&|)]|$))	writing a secret file from the shell. Put placeholders in .env.example and let the human fill the real file.

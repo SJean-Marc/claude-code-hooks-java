@@ -31,6 +31,17 @@ block() {
 # shellcheck disable=SC2034  # used by the hooks that source this file
 RULES_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../rules" && pwd)"
 
+# rule_matches <rules-file> <text>: succeeds if any rule matches (case-insensitive), blocks nothing
+rule_matches() {
+  local file="$1" text="$2" regex reason
+  [[ -f "$file" ]] || block "rules file not found: $file"
+  while IFS=$'\t' read -r regex reason; do
+    [[ -z "$regex" || "$regex" == \#* ]] && continue
+    grep -Ei -q -- "$regex" <<< "$text" && return 0
+  done < "$file"
+  return 1
+}
+
 # check_rules <rules-file> <text> [grep-flags]
 # Each non-comment line of the rules file is:  <extended regex><TAB><reason>
 # grep-flags defaults to -Ei (case-insensitive); pass -E for case-sensitive rules.

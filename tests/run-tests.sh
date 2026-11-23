@@ -128,6 +128,26 @@ sec_block "$(write_input "/home/dev/.ssh/id_ed25519" 'x')" 'write ssh key'
 sec_block "$(edit_input "/home/dev/.m2/settings.xml" '<password>x</password>')" 'edit maven settings'
 sec_allow "$(write_input "$P/.env.example" 'DB_PASSWORD=changeme')" 'write .env.example'
 
+# reading secret files (Read and Grep tools): their content would enter the conversation
+read_input() { jq -cn --arg f "$1" '{hook_event_name:"PreToolUse",tool_name:"Read",tool_input:{file_path:$f}}'; }
+grep_input() { jq -cn --arg p "$1" --arg g "$2" '{hook_event_name:"PreToolUse",tool_name:"Grep",tool_input:({pattern:"PASSWORD",path:$p} + (if $g == "" then {} else {glob:$g} end))}'; }
+sec_block "$(read_input "$P/.env")" 'Read .env'
+sec_block "$(read_input "$P/.env.production")" 'Read .env.production'
+sec_block "$(read_input "$P/src/main/resources/server.jks")" 'Read keystore'
+sec_block "$(read_input "/home/dev/.ssh/id_rsa")" 'Read ssh key'
+sec_block "$(read_input "/home/dev/.m2/settings.xml")" 'Read maven settings'
+sec_allow "$(read_input "$P/.env.example")" 'Read .env.example'
+sec_allow "$(read_input "$P/src/main/resources/application.yml")" 'Read application.yml'
+sec_allow "$(read_input "$P/src/main/java/com/shop/Env.java")" 'Read Env.java'
+sec_block "$(grep_input "$P/.env" '')" 'Grep in .env'
+sec_block "$(grep_input "$P" '.env*')" 'Grep glob .env*'
+sec_block "$(grep_input "$P" '*.pem')" 'Grep glob *.pem'
+sec_block "$(grep_input "$P" '{.env,*.yml}')" 'Grep glob with .env alternative'
+sec_allow "$(grep_input "$P" '')" 'Grep whole project (deny rules hide secret files)'
+sec_allow "$(grep_input "$P" '*.java')" 'Grep glob *.java'
+sec_allow "$(grep_input "$P" '.env.example')" 'Grep glob .env.example'
+sec_allow "$(grep_input "$P/src/main/java/com/shop/Environment.java" '')" 'Grep in Environment.java'
+
 # content, any file
 sec_block "$(write_input "$P/src/main/java/Config.java" "String key = \"$AWS_KEY\";")" 'AWS key in Java'
 sec_block "$(edit_input "$P/README.md" "export ANTHROPIC_API_KEY=$ANTHROPIC_KEY")" 'Anthropic key in README'
@@ -188,7 +208,8 @@ hook_count() { jq '[.hooks[][] | .hooks[] | select(.command | test("CLAUDE_PROJE
 mkdir -p "$INSTALL_TMP/fresh"
 "$ROOT/install.sh" "$INSTALL_TMP/fresh" >/dev/null 2>&1
 check 'fresh: settings.json created and valid'  jq empty "$INSTALL_TMP/fresh/.claude/settings.json"
-check 'fresh: 3 hooks registered'               test "$(hook_count "$INSTALL_TMP/fresh/.claude/settings.json")" = 3
+check 'fresh: 4 hook registrations'             test "$(hook_count "$INSTALL_TMP/fresh/.claude/settings.json")" = 4
+check 'fresh: deny rules copied'                 test "$(jq '.permissions.deny | length' "$INSTALL_TMP/fresh/.claude/settings.json")" = "$(jq '.permissions.deny | length' "$ROOT/.claude/settings.json")"
 check 'fresh: hooks are executable'             test -x "$INSTALL_TMP/fresh/.claude/hooks/protect-secrets.sh"
 check 'fresh: rules copied'                     test -f "$INSTALL_TMP/fresh/.claude/hooks/rules/dangerous-commands.tsv"
 check 'fresh: repo-specific test-command not copied' test ! -e "$INSTALL_TMP/fresh/.claude/hooks/test-command"
@@ -207,7 +228,8 @@ S="$INSTALL_TMP/existing/.claude/settings.json"
 check 'merge: permissions kept'      test "$(jq -r '.permissions.deny[0]' "$S")" = 'Read(./.env)'
 check 'merge: team hook kept'        test "$(jq -r '.hooks.PreToolUse[0].hooks[0].command' "$S")" = './team-audit.sh'
 check 'merge: Stop hook kept'        test "$(jq -r '.hooks.Stop[0].hooks[0].command' "$S")" = './notify.sh'
-check 'merge: 3 hooks added'         test "$(hook_count "$S")" = 3
+check 'merge: 4 registrations added' test "$(hook_count "$S")" = 4
+check 'merge: deny rules merged'     test "$(jq '.permissions.deny | length' "$S")" = "$(( $(jq '.permissions.deny | length' "$ROOT/.claude/settings.json") + 1 ))"
 check 'merge: one Bash group only'   test "$(jq '[.hooks.PreToolUse[] | select(.matcher == "Bash")] | length' "$S")" = 1
 check 'merge: backup written'        bash -c "compgen -G '$INSTALL_TMP/existing/.claude/settings.json.bak-*'"
 
@@ -217,6 +239,15 @@ cp "$S" "$INSTALL_TMP/before.json"
 check 'rerun: settings unchanged'    cmp -s "$S" "$INSTALL_TMP/before.json"
 backups=("$INSTALL_TMP"/existing/.claude/settings.json.bak-*)
 check 'rerun: no second backup'      test "${#backups[@]}" = 1
+
+# upgrade: settings from an older version (no Read|Grep hook, no deny rules) get the missing parts
+mkdir -p "$INSTALL_TMP/old/.claude"
+jq 'del(.permissions) | .hooks.PreToolUse |= map(select(.matcher != "Read|Grep"))' "$ROOT/.claude/settings.json" > "$INSTALL_TMP/old/.claude/settings.json"
+"$ROOT/install.sh" "$INSTALL_TMP/old" >/dev/null 2>&1
+O="$INSTALL_TMP/old/.claude/settings.json"
+check 'upgrade: Read|Grep hook added'  test "$(jq '[.hooks.PreToolUse[] | select(.matcher == "Read|Grep")] | length' "$O")" = 1
+check 'upgrade: no duplicate'          test "$(hook_count "$O")" = 4
+check 'upgrade: deny rules added'      jq -e '.permissions.deny | index("Read(**/.env)")' "$O"
 
 # customized rules are kept, unless --force
 R="$INSTALL_TMP/existing/.claude/hooks/rules/dangerous-commands.tsv"

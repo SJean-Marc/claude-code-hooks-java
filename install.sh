@@ -4,8 +4,8 @@
 #   ./install.sh [--dry-run] [--force] <target-project-dir>
 #
 # - copies .claude/hooks/ (scripts, lib, rules) into <target>/.claude/hooks/
-# - merges the "hooks" section into <target>/.claude/settings.json
-#   (keeps everything already there, adds only the missing hook commands, backs the file up first)
+# - merges the "hooks" section and the permissions.deny rules into <target>/.claude/settings.json
+#   (keeps everything already there, adds only what is missing, backs the file up first)
 # - safe to run again: it is also how you update
 #
 #   --dry-run   show what would change, change nothing
@@ -78,12 +78,18 @@ backup=""
 current='{}'
 [[ -f "$settings" ]] && current="$(cat "$settings")"
 
-merged="$(jq --argjson ours "$(jq '.hooks' "$SRC/.claude/settings.json")" '
-  .hooks = (.hooks // {})
+merged="$(jq --argjson ours "$(jq '.hooks' "$SRC/.claude/settings.json")" \
+             --argjson deny "$(jq '.permissions.deny // []' "$SRC/.claude/settings.json")" '
+  # permissions.deny: add the missing rules, keep the existing ones (and their order)
+  (if ($deny | length) > 0 then
+     .permissions.deny = ((.permissions.deny // []) as $d | $d + ($deny | map(select(. as $r | $d | index($r) | not))))
+   else . end)
+  | .hooks = (.hooks // {})
   | reduce ($ours | keys_unsorted[]) as $event (.;
       .hooks[$event] = (.hooks[$event] // [])
       | reduce $ours[$event][] as $group (.;
-          [ .hooks[$event][] | .hooks[]? | .command ] as $existing
+          # the same script can be registered under several matchers: compare within the same matcher only
+          [ .hooks[$event][] | select(.matcher == $group.matcher) | .hooks[]? | .command ] as $existing
           | ($group.hooks | map(select(.command as $c | $existing | index($c) | not))) as $missing
           | if ($missing | length) == 0 then .
             else
@@ -100,7 +106,7 @@ else
     backup="$settings.bak-$(date +%Y%m%d-%H%M%S)"
     say "backup   .claude/settings.json -> $(basename "$backup")"
     run cp "$settings" "$backup"
-    say "merged   hooks into .claude/settings.json"
+    say "merged   hooks and deny rules into .claude/settings.json"
   else
     say "created  .claude/settings.json"
   fi

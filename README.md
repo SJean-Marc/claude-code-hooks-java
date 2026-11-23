@@ -22,8 +22,10 @@ You can ask the agent to be careful in `CLAUDE.md`. It will comply most of the t
 | Hook | Runs on | Blocks |
 |---|---|---|
 | [`block-dangerous-commands.sh`](.claude/hooks/block-dangerous-commands.sh) | every shell command (`Bash`) | deletes outside the project, `sudo`, `chmod 777`, force push, `reset --hard`, `clean -f`, `commit --no-verify`, `curl \| sh`, `mvn deploy` / `gradle publish`, `docker push`, `kubectl delete`, destructive SQL, reading or writing `.env` and private keys |
-| [`protect-secrets.sh`](.claude/hooks/protect-secrets.sh) | every file write (`Edit`, `Write`) | creating `.env`, keys and keystores; API keys, tokens, private keys and passwords in URLs in any file; hard-coded passwords in `application.properties` / `application.yml` (placeholders like `${DB_PASSWORD}` are fine) |
+| [`protect-secrets.sh`](.claude/hooks/protect-secrets.sh) | every file write (`Edit`, `Write`) and read (`Read`, `Grep`) | reading `.env`, keys and keystores; creating them; API keys, tokens, private keys and passwords in URLs in any file; hard-coded passwords in `application.properties` / `application.yml` (placeholders like `${DB_PASSWORD}` are fine) |
 | [`require-tests-before-commit.sh`](.claude/hooks/require-tests-before-commit.sh) | `git commit` run by the agent | the commit, while the tests are red. The last 40 lines of the test output go back to the agent so it can fix the code |
+
+`settings.json` also has `permissions.deny` rules (`Read(**/.env)`, `Read(**/*.pem)`...). They are Claude Code's own protection: a second lock that does not depend on a script, and the one that hides secret files from a `Grep` over the whole project.
 
 When a hook blocks, Claude sees the reason and the alternative, for example:
 
@@ -61,9 +63,9 @@ cd claude-code-hooks-java
 ./install.sh ~/code/my-spring-app
 ```
 
-`install.sh` copies `.claude/hooks/` into your project and **merges** the hooks into its `.claude/settings.json`:
+`install.sh` copies `.claude/hooks/` into your project and **merges** the hooks and the deny rules into its `.claude/settings.json`:
 
-- what is already there stays (permissions, your own hooks, other settings); only the missing hook commands are added;
+- what is already there stays (permissions, your own hooks, other settings); only the missing hook commands and deny rules are added;
 - `settings.json` is backed up before any change (`settings.json.bak-<date>`: delete it once you have checked the merge, do not commit it), and an invalid one is left untouched;
 - rule files you have customized are kept (`--force` to overwrite them);
 - running it again changes nothing, so it is also how you update.
@@ -96,16 +98,17 @@ Write the message for the agent: say **why** it is blocked and **what to do inst
 
 ## How it is tested
 
-- [`tests/run-tests.sh`](tests/run-tests.sh): 118 checks. For the hooks, each case sends the same JSON Claude Code sends, then checks the hook blocks or allows. For the installer: fresh project, merge into existing settings, rerun, customized rules, dry run, invalid JSON. About a third of the cases check that normal commands still pass: a guardrail that blocks `rm -rf target` gets switched off by the team within a day.
+- [`tests/run-tests.sh`](tests/run-tests.sh): 139 checks. For the hooks, each case sends the same JSON Claude Code sends, then checks the hook blocks or allows. For the installer: fresh project, merge into existing settings, upgrade from an older version, rerun, customized rules, dry run, invalid JSON. About a third of the cases check that normal commands still pass: a guardrail that blocks `rm -rf target` gets switched off by the team within a day.
 - CI on Linux and macOS (GNU and BSD `grep` differ), plus ShellCheck.
 - This repo uses its own hooks: its `.claude/hooks/test-command` runs the test suite before every commit Claude makes here.
-- End-to-end checks with a real Claude Code session (2.1.330). The first run found a hole: with the `Write` tool blocked on `.env`, the agent simply ran `printf 'DB_PASSWORD=...' > .env` in the shell. The shell rules now cover writes to secret files too, and the same session is blocked both ways.
+- End-to-end checks with a real Claude Code session (2.1.330). The first run found a hole: with the `Write` tool blocked on `.env`, the agent simply ran `printf 'DB_PASSWORD=...' > .env` in the shell. The shell rules now cover writes to secret files too, and the same session is blocked both ways. A later check found the mirror hole: `cat .env` was blocked, but the `Read` tool was not hooked, and a `Grep` over the project printed the `.env` lines. Reads now go through the hook and the deny rules; a real session asked for the password never sees it.
 
 That last point is the main lesson: **an agent that is blocked looks for another path.** Every protection needs to cover every tool that can reach the same result.
 
 ## Limits
 
 - These hooks are **guardrails against mistakes, not a sandbox**. Regular expressions on command lines can be bypassed by an agent (or a person) that really tries: encoded commands, scripts written then run, etc. For untrusted code, add an OS-level sandbox and [permission rules](https://code.claude.com/docs/en/settings).
+- Shell reads are matched by command name (`cat`, `head`, `grep`, `source`...). An unusual command or a small script can still print a secret file: the `Read`/`Grep` hook and the deny rules do not see what a shell command does.
 - Secret detection is pattern-based. It catches the common token formats and hard-coded config values, not every secret. Keep a secret scanner in your CI as well.
 - False positives happen. When one does, change the rule in the `.tsv` file and add a test case for it.
 
@@ -132,12 +135,12 @@ tests/run-tests.sh         test suite (bash + jq)
 
 **Solution :** trois hooks Claude Code, en bash + jq, qui bloquent l'action **avant** qu'elle se produise et expliquent à l'agent quoi faire à la place :
 - commandes dangereuses (suppressions hors du projet, force push, `reset --hard`, `curl | sh`, déploiement, SQL destructif, fichiers de secrets) ;
-- secrets dans les fichiers (clés API, tokens, mots de passe en dur dans `application.yml`) ;
+- secrets dans les fichiers (clés API, tokens, mots de passe en dur dans `application.yml`) et lecture des fichiers de secrets (`.env`, clés) par les outils `Read` et `Grep`, doublée de règles `permissions.deny` ;
 - pas de commit tant que les tests sont rouges.
 
 **Pourquoi bloquer le `.env` ?** Dans un projet bien organisé, l'agent n'a jamais besoin de lire ni d'écrire un vrai secret : c'est l'application qui en a besoin, pas lui. Tout ce que l'agent lit entre dans la conversation (envoyé au modèle, gardé dans l'historique de session). Les secrets sont donc soit dans un coffre (Vault, AWS Secrets Manager, 1Password...) et injectés au lancement du processus, soit dans des variables d'environnement définies par l'humain ; les fichiers de config ne contiennent que `${DB_PASSWORD}` et l'agent écrit un `.env.example`.
 
-**Utilisation :** `./install.sh <projet>` copie les hooks et fusionne `.claude/settings.json` sans rien écraser (sauvegarde, `--dry-run`, relançable pour mettre à jour). Les règles s'adaptent dans les fichiers `.tsv`. 118 tests, CI sous Linux et macOS, et des essais avec une vraie session Claude Code. Le premier essai a montré qu'un agent bloqué sur l'outil `Write` passe par le shell : chaque protection doit couvrir tous les chemins.
+**Utilisation :** `./install.sh <projet>` copie les hooks et fusionne `.claude/settings.json` sans rien écraser (sauvegarde, `--dry-run`, relançable pour mettre à jour). Les règles s'adaptent dans les fichiers `.tsv`. 139 tests, CI sous Linux et macOS, et des essais avec une vraie session Claude Code. Le premier essai a montré qu'un agent bloqué sur l'outil `Write` passe par le shell : chaque protection doit couvrir tous les chemins.
 
 ## License
 

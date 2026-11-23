@@ -34,6 +34,22 @@ Use --force-with-lease on your own branch, or ask the human.
 
 The agent then adapts on its own: it uses `--force-with-lease`, writes `.env.example` instead of `.env`, or fixes the failing test.
 
+## Why block `.env`? Where do the secrets go?
+
+In a well-set-up project, **the agent never needs to read or write a real secret**. The application needs the database password; the agent does not.
+
+Anything the agent reads (a file, a command output) becomes part of the conversation: it is sent to the model and kept in the session transcript on disk. A secret that goes through the agent has left your vault.
+
+Good practice, so the case should never come up:
+
+- **Secrets live in a vault** (HashiCorp Vault, AWS Secrets Manager, 1Password, Bitwarden...) and are injected when the process starts, for example `op run --env-file=.env.tpl -- ./mvnw spring-boot:run`, where `.env.tpl` only holds references like `op://team/db/password`;
+- **or in environment variables** set by the human before starting Claude Code (shell, direnv, CI secrets). The process inherits them; the agent only runs `./mvnw spring-boot:run`.
+- Config files only contain placeholders: `spring.datasource.password=${DB_PASSWORD}`.
+- Tests use throwaway credentials (Testcontainers, docker-compose), not real ones.
+- The agent writes `.env.example` with empty or fake values; a human fills in the real file.
+
+So when the hook blocks the agent on `.env`, it is not taking a useful capability away: it stops the one path where a real secret would end up in the conversation.
+
 ## Use it in your project
 
 Requirements: `bash` and [`jq`](https://jqlang.org). Nothing else.
@@ -118,6 +134,8 @@ tests/run-tests.sh         test suite (bash + jq)
 - commandes dangereuses (suppressions hors du projet, force push, `reset --hard`, `curl | sh`, déploiement, SQL destructif, fichiers de secrets) ;
 - secrets dans les fichiers (clés API, tokens, mots de passe en dur dans `application.yml`) ;
 - pas de commit tant que les tests sont rouges.
+
+**Pourquoi bloquer le `.env` ?** Dans un projet bien organisé, l'agent n'a jamais besoin de lire ni d'écrire un vrai secret : c'est l'application qui en a besoin, pas lui. Tout ce que l'agent lit entre dans la conversation (envoyé au modèle, gardé dans l'historique de session). Les secrets sont donc soit dans un coffre (Vault, AWS Secrets Manager, 1Password...) et injectés au lancement du processus, soit dans des variables d'environnement définies par l'humain ; les fichiers de config ne contiennent que `${DB_PASSWORD}` et l'agent écrit un `.env.example`.
 
 **Utilisation :** `./install.sh <projet>` copie les hooks et fusionne `.claude/settings.json` sans rien écraser (sauvegarde, `--dry-run`, relançable pour mettre à jour). Les règles s'adaptent dans les fichiers `.tsv`. 118 tests, CI sous Linux et macOS, et des essais avec une vraie session Claude Code. Le premier essai a montré qu'un agent bloqué sur l'outil `Write` passe par le shell : chaque protection doit couvrir tous les chemins.
 
